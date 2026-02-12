@@ -1,0 +1,48 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+
+# VS Code (на всяк випадок)
+.vscode/
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== Data / Artifacts (не комітимо) =====
+data/
+models/
+reports/figures/
+
+# ===== MLflow =====
+mlruns/
+
+# ===== Logs / Temp =====
+*.log
+logs/
+tmp/
+temp/
+
+# ===== Build / Packaging =====
+build/
+dist/
+*.egg-info/
+
+# ===== Optional: local config/secrets =====
+.env
+*.key
+*.pem

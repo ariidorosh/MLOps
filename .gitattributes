@@ -1,0 +1,4 @@
+* text=auto
+
+# Notebooks are JSON; keep them as-is
+*.ipynb -text

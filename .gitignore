@@ -24,7 +24,6 @@ Thumbs.db
 .ipynb_checkpoints/
 
 # ===== Data / Artifacts (не комітимо) =====
-data/
 models/
 reports/figures/
 
@@ -51,4 +50,12 @@ dist/
 *.pem
 
 
+# Data (DVC)
+data/
+!data/raw/
+data/raw/*
+!data/raw/*.dvc
+!data/raw/.gitignore
+
+# Local DVC remote (if inside repo)
 dvc_storage/

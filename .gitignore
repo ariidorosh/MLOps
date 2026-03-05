@@ -49,3 +49,6 @@ dist/
 .env
 *.key
 *.pem
+
+
+dvc_storage/

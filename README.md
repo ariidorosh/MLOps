@@ -30,9 +30,8 @@ Create and activate a virtual environment (already done if you use PyCharm venv)
 
 ```bash
 pip install -r requirements.txt
+````
 
-
-````markdown
 ## Run training
 ```bash
 python -m src.train

@@ -30,6 +30,9 @@ reports/figures/
 
 # ===== MLflow =====
 mlruns/
+mlflow.db
+mlflow.db-wal
+mlflow.db-shm
 
 # ===== Logs / Temp =====
 *.log

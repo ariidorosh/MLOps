@@ -6,3 +6,6 @@ seaborn>=0.13
 mlflow>=2.16
 jupyter>=1.0
 ipykernel>=6.29
+
+joblib>=1.4
+skops>=0.10

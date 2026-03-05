@@ -1,4 +1,4 @@
 [core]
     remote = mylocal
 ['remote "mylocal"']
-    url = ../.idea/dvc_storage
+    url = ../dvc_storage

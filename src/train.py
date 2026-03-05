@@ -5,25 +5,33 @@ import argparse
 import inspect
 import sys
 from pathlib import Path
+from typing import Iterable
 
 import joblib
 import mlflow
 import mlflow.sklearn
+import pandas as pd
 from sklearn.base import clone
+from sklearn.compose import ColumnTransformer, make_column_selector
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
 
 from .config import (
     ROOT,
-    DATA_RAW_PATH,
+    PREPARED_TRAIN_PATH,
+    PREPARED_TEST_PATH,
     MODELS_DIR,
     FIGURES_DIR,
+    TARGET_COL,
+    ID_COLS,
+    RANDOM_STATE,
     MLFLOW_EXPERIMENT_NAME,
     MLFLOW_DB_PATH,
     MLFLOW_ARTIFACTS_DIR,
 )
-from .data_utils import load_raw_csv, clean_telco_df, make_train_test, save_processed_df
 from .evaluate import (
     compute_metrics,
     save_confusion_matrix,
@@ -31,26 +39,26 @@ from .evaluate import (
     save_feature_importance,
 )
 
-# Метадані для MLflow tags (щоб було гарно в UI)
 AUTHOR = "ariidorosh"
 DATASET_NAME = "telco-churn"
-DATASET_VERSION = "v1"
+DATASET_VERSION = "v2_prepared_split"
 
 
+# -------------------------
+# MLflow utils
+# -------------------------
 def _as_sqlite_uri(db_path: Path) -> str:
     return f"sqlite:///{db_path.resolve().as_posix()}"
 
 
 def _ensure_experiment() -> None:
     artifact_root_uri = MLFLOW_ARTIFACTS_DIR.resolve().as_uri()
-
     exp = mlflow.get_experiment_by_name(MLFLOW_EXPERIMENT_NAME)
     if exp is None:
         mlflow.create_experiment(
             name=MLFLOW_EXPERIMENT_NAME,
             artifact_location=artifact_root_uri,
         )
-
     mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
 
 
@@ -58,33 +66,6 @@ def _set_mlflow() -> None:
     MLFLOW_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     mlflow.set_tracking_uri(_as_sqlite_uri(MLFLOW_DB_PATH))
     _ensure_experiment()
-
-
-def _build_model(model_name: str, params: dict):
-    if model_name == "logreg":
-        C = float(params.get("C", 1.0))
-        solver = str(params.get("solver", "liblinear"))
-        return LogisticRegression(
-            C=C,
-            solver=solver,
-            max_iter=2000,
-            random_state=42,
-        )
-
-    if model_name == "rf":
-        n_estimators = int(params.get("n_estimators", 300))
-        max_depth = params.get("max_depth", None)
-        if max_depth is not None:
-            max_depth = int(max_depth)
-
-        return RandomForestClassifier(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            random_state=42,
-            n_jobs=-1,
-        )
-
-    raise ValueError(f"Невідомий model_name={model_name}")
 
 
 def _read_requirements_txt() -> list[str] | None:
@@ -101,17 +82,10 @@ def _read_requirements_txt() -> list[str] | None:
     return lines or None
 
 
-def _mlflow_log_model(pipeline) -> None:
-    """
-    skops у тебе падав (untrusted numpy.dtype), тому тут тільки cloudpickle.
-    Також:
-    - якщо MLflow підтримує name -> не буде deprecated warning про artifact_path
-    - якщо MLflow підтримує pip_requirements -> підкинемо requirements.txt (менше спаму і краще для відтворюваності)
-    """
+def _mlflow_log_model(pipeline: Pipeline) -> None:
     sig = inspect.signature(mlflow.sklearn.log_model)
 
     kwargs = {}
-
     if "serialization_format" in sig.parameters:
         kwargs["serialization_format"] = "cloudpickle"
 
@@ -144,105 +118,213 @@ def _set_common_tags(model_name: str, run_group: str | None = None, tuning_param
             mlflow.set_tag("tuning_param", "n_estimators/max_depth")
 
 
+# -------------------------
+# Data loading (prepared)
+# -------------------------
+def _normalize_target(y: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(y):
+        return y.astype(int)
+
+    ys = y.astype(str).str.strip()
+    uniq = set(ys.unique())
+
+    if uniq.issubset({"Yes", "No"}):
+        return ys.map({"No": 0, "Yes": 1}).astype(int)
+
+    if uniq.issubset({"0", "1"}):
+        return ys.astype(int)
+
+    return ys  # fallback
+
+
+def _load_prepared(
+    train_path: Path,
+    test_path: Path,
+    target_col: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    if not train_path.exists():
+        raise FileNotFoundError(f"Prepared train file not found: {train_path}")
+    if not test_path.exists():
+        raise FileNotFoundError(f"Prepared test file not found: {test_path}")
+
+    train_df = pd.read_csv(train_path)
+    test_df = pd.read_csv(test_path)
+
+    if target_col not in train_df.columns or target_col not in test_df.columns:
+        raise ValueError(f"Target column '{target_col}' must exist in both train.csv and test.csv")
+
+    # прибираємо id-колонки (якщо раптом лишилися)
+    drop_cols = [c for c in ID_COLS if c in train_df.columns]
+    if drop_cols:
+        train_df = train_df.drop(columns=drop_cols)
+        test_df = test_df.drop(columns=[c for c in drop_cols if c in test_df.columns])
+
+    y_train = _normalize_target(train_df[target_col])
+    y_test = _normalize_target(test_df[target_col])
+
+    X_train = train_df.drop(columns=[target_col])
+    X_test = test_df.drop(columns=[target_col])
+
+    # safety: TotalCharges інколи як string
+    if "TotalCharges" in X_train.columns:
+        X_train["TotalCharges"] = pd.to_numeric(X_train["TotalCharges"], errors="coerce")
+        X_test["TotalCharges"] = pd.to_numeric(X_test["TotalCharges"], errors="coerce")
+
+    return X_train, X_test, y_train, y_test
+
+
+# -------------------------
+# Preprocessor (SAFE for Windows)
+# -------------------------
+def _make_onehot() -> OneHotEncoder:
+    sig = inspect.signature(OneHotEncoder)
+    if "sparse_output" in sig.parameters:
+        return OneHotEncoder(handle_unknown="ignore", sparse_output=True)
+    return OneHotEncoder(handle_unknown="ignore", sparse=True)
+
+
+def _build_preprocessor() -> ColumnTransformer:
+    """
+    БЕЗ scaler — це максимально стабільно на Windows і достатньо для LogisticRegression baseline.
+    - numeric: median impute
+    - categorical: most_frequent impute + one-hot
+    """
+    numeric_selector = make_column_selector(dtype_include=["number"])
+    categorical_selector = make_column_selector(dtype_exclude=["number"])
+
+    num_pipe = Pipeline(steps=[("imputer", SimpleImputer(strategy="median"))])
+    cat_pipe = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("onehot", _make_onehot()),
+        ]
+    )
+
+    return ColumnTransformer(
+        transformers=[
+            ("num", num_pipe, numeric_selector),
+            ("cat", cat_pipe, categorical_selector),
+        ],
+        remainder="drop",
+        verbose_feature_names_out=False,
+    )
+
+
+# -------------------------
+# Models
+# -------------------------
+def _build_model(model_name: str, params: dict):
+    if model_name == "logreg":
+        C = float(params.get("C", 1.0))
+        solver = str(params.get("solver", "liblinear"))
+        return LogisticRegression(
+            C=C,
+            solver=solver,
+            max_iter=2000,
+            random_state=RANDOM_STATE,
+        )
+
+    if model_name == "rf":
+        n_estimators = int(params.get("n_estimators", 300))
+        max_depth = params.get("max_depth", None)
+        if max_depth is not None:
+            max_depth = int(max_depth)
+
+        return RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=RANDOM_STATE,
+            n_jobs=1,  # safe
+        )
+
+    raise ValueError(f"Unknown model_name: {model_name}")
+
+
 def _format_c_for_name(c: float) -> str:
-    # для run_name: акуратно і стабільно
-    s = f"{c:g}"
-    return s
+    return f"{c:g}"
 
 
+# -------------------------
+# Training routines
+# -------------------------
 def run_logreg_c_sweep(
-    c_values: list[float] | tuple[float, ...],
+    c_values: Iterable[float],
     solver: str = "liblinear",
-    run_prefix: str = "lab1_logreg_C",
-    run_group: str = "lab1_c_sweep",
+    run_prefix: str = "lab2_logreg_C",
+    run_group: str = "lab2_c_sweep",
+    train_path: Path = PREPARED_TRAIN_PATH,
+    test_path: Path = PREPARED_TEST_PATH,
 ) -> None:
-    """
-    Лабораторний сценарій:
-    - 5+ запусків
-    - один ключовий гіперпараметр: C
-    - логування train_* і test_* метрик (щоб видно було overfitting)
-    - логування артефактів і моделі
-    """
     _set_mlflow()
 
-    df = load_raw_csv(DATA_RAW_PATH)
-    df = clean_telco_df(df)
-    save_processed_df(df)
-
-    preprocessor, X_train, X_test, y_train, y_test = make_train_test(df)
+    X_train, X_test, y_train, y_test = _load_prepared(train_path, test_path, TARGET_COL)
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
     best_score = -1.0
-    best_pipeline = None
-    best_run_name = None
+    best_pipeline: Pipeline | None = None
+    best_run_name: str | None = None
 
-    for idx, c in enumerate(c_values, start=1):
+    base_preprocessor = _build_preprocessor()
+
+    for c in c_values:
         c_val = float(c)
         run_name = f"{run_prefix}_{_format_c_for_name(c_val)}"
 
         model = _build_model("logreg", {"C": c_val, "solver": solver})
         pipeline = Pipeline(
             steps=[
-                ("preprocess", clone(preprocessor)),
+                ("preprocess", clone(base_preprocessor)),
                 ("model", model),
             ]
         )
 
-        # локально зручно мати копію артефактів по рану, але в MLflow шлях буде однаковий:
-        # figures/confusion_matrix.png, figures/feature_importance.png, reports/classification_report.txt
         run_art_dir = FIGURES_DIR / run_name
         run_art_dir.mkdir(parents=True, exist_ok=True)
 
         with mlflow.start_run(run_name=run_name):
-            # params
             mlflow.log_param("model_name", "logreg")
             mlflow.log_param("C", c_val)
             mlflow.log_param("solver", solver)
-
-            # tags
             _set_common_tags("logreg", run_group=run_group, tuning_param="C")
 
-            # train
             pipeline.fit(X_train, y_train)
 
+            # train metrics
             y_pred_train = pipeline.predict(X_train)
-            y_proba_train = (
-                pipeline.predict_proba(X_train)[:, 1] if hasattr(pipeline, "predict_proba") else None
-            )
-            metrics_train = compute_metrics(y_train, y_pred_train, y_proba=y_proba_train)
-            mlflow.log_metrics({f"train_{k}": v for k, v in metrics_train.items() if v is not None})
+            y_proba_train = pipeline.predict_proba(X_train)[:, 1] if hasattr(pipeline, "predict_proba") else None
+            m_train = compute_metrics(y_train, y_pred_train, y_proba=y_proba_train)
+            mlflow.log_metrics({f"train_{k}": v for k, v in m_train.items() if v is not None})
 
-            # test
+            # test metrics
             y_pred_test = pipeline.predict(X_test)
-            y_proba_test = (
-                pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
-            )
-            metrics_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
-            mlflow.log_metrics({f"test_{k}": v for k, v in metrics_test.items() if v is not None})
+            y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
+            m_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
+            mlflow.log_metrics({f"test_{k}": v for k, v in m_test.items() if v is not None})
 
-            # artifacts (однакові імена -> "common artifacts" в Compare буде працювати)
+            # artifacts
             cm_path = run_art_dir / "confusion_matrix.png"
             save_confusion_matrix(y_test, y_pred_test, cm_path)
             mlflow.log_artifact(str(cm_path), artifact_path="figures")
 
             report_path = run_art_dir / "classification_report.txt"
-            report_text = make_classification_report_text(y_test, y_pred_test)
-            report_path.write_text(report_text, encoding="utf-8")
+            report_path.write_text(make_classification_report_text(y_test, y_pred_test), encoding="utf-8")
             mlflow.log_artifact(str(report_path), artifact_path="reports")
 
             fi_path = run_art_dir / "feature_importance.png"
-            if save_feature_importance(pipeline, fi_path, top_k=20):
-                mlflow.log_artifact(str(fi_path), artifact_path="figures")
+            try:
+                if save_feature_importance(pipeline, fi_path, top_k=20):
+                    mlflow.log_artifact(str(fi_path), artifact_path="figures")
+            except Exception:
+                # важливість ознак не критична для логрег — не валимо run
+                pass
 
-            # model
             _mlflow_log_model(pipeline)
 
-            # best by test_roc_auc else test_f1
-            score = metrics_test.get("roc_auc")
+            score = m_test.get("roc_auc")
             if score is None:
-                score = metrics_test.get("f1", 0.0)
+                score = m_test.get("f1", 0.0)
 
             if score is not None and float(score) > best_score:
                 best_score = float(score)
@@ -255,21 +337,13 @@ def run_logreg_c_sweep(
         print(f"Best model saved to: {out_path}")
         print(f"Best run: {best_run_name}, score={best_score:.4f}")
     else:
-        print("Не вийшло натренувати жодної моделі (перевір дані).")
+        print("Не вийшло натренувати жодної моделі (перевір prepared дані).")
 
 
 def run_grid_experiments() -> None:
-    """
-    Якщо захочеш лишити старий режим (логрег + rf) — він тут.
-    Але для методички “один гіперпараметр, 5 запусків” краще використовувати run_logreg_c_sweep().
-    """
     _set_mlflow()
-
-    df = load_raw_csv(DATA_RAW_PATH)
-    df = clean_telco_df(df)
-    save_processed_df(df)
-
-    preprocessor, X_train, X_test, y_train, y_test = make_train_test(df)
+    X_train, X_test, y_train, y_test = _load_prepared(PREPARED_TRAIN_PATH, PREPARED_TEST_PATH, TARGET_COL)
+    base_preprocessor = _build_preprocessor()
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -284,16 +358,16 @@ def run_grid_experiments() -> None:
     ]
 
     best_score = -1.0
-    best_pipeline = None
-    best_run_name = None
+    best_pipeline: Pipeline | None = None
+    best_run_name: str | None = None
 
     for idx, (model_name, params) in enumerate(experiments, start=1):
         run_name = f"{idx:02d}_{model_name}"
-
         model = _build_model(model_name, params)
+
         pipeline = Pipeline(
             steps=[
-                ("preprocess", clone(preprocessor)),
+                ("preprocess", clone(base_preprocessor)),
                 ("model", model),
             ]
         )
@@ -305,43 +379,29 @@ def run_grid_experiments() -> None:
             mlflow.log_param("model_name", model_name)
             for k, v in params.items():
                 mlflow.log_param(k, v)
-
             _set_common_tags(model_name)
 
             pipeline.fit(X_train, y_train)
 
             y_pred_train = pipeline.predict(X_train)
-            y_proba_train = (
-                pipeline.predict_proba(X_train)[:, 1] if hasattr(pipeline, "predict_proba") else None
-            )
-            metrics_train = compute_metrics(y_train, y_pred_train, y_proba=y_proba_train)
-            mlflow.log_metrics({f"train_{k}": v for k, v in metrics_train.items() if v is not None})
+            y_proba_train = pipeline.predict_proba(X_train)[:, 1] if hasattr(pipeline, "predict_proba") else None
+            m_train = compute_metrics(y_train, y_pred_train, y_proba=y_proba_train)
+            mlflow.log_metrics({f"train_{k}": v for k, v in m_train.items() if v is not None})
 
             y_pred_test = pipeline.predict(X_test)
-            y_proba_test = (
-                pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
-            )
-            metrics_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
-            mlflow.log_metrics({f"test_{k}": v for k, v in metrics_test.items() if v is not None})
+            y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
+            m_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
+            mlflow.log_metrics({f"test_{k}": v for k, v in m_test.items() if v is not None})
 
             cm_path = run_art_dir / "confusion_matrix.png"
             save_confusion_matrix(y_test, y_pred_test, cm_path)
             mlflow.log_artifact(str(cm_path), artifact_path="figures")
 
-            report_path = run_art_dir / "classification_report.txt"
-            report_text = make_classification_report_text(y_test, y_pred_test)
-            report_path.write_text(report_text, encoding="utf-8")
-            mlflow.log_artifact(str(report_path), artifact_path="reports")
-
-            fi_path = run_art_dir / "feature_importance.png"
-            if save_feature_importance(pipeline, fi_path, top_k=20):
-                mlflow.log_artifact(str(fi_path), artifact_path="figures")
-
             _mlflow_log_model(pipeline)
 
-            score = metrics_test.get("roc_auc")
+            score = m_test.get("roc_auc")
             if score is None:
-                score = metrics_test.get("f1", 0.0)
+                score = m_test.get("f1", 0.0)
 
             if score is not None and float(score) > best_score:
                 best_score = float(score)
@@ -353,23 +413,17 @@ def run_grid_experiments() -> None:
         joblib.dump(best_pipeline, out_path)
         print(f"Best model saved to: {out_path}")
         print(f"Best run: {best_run_name}, score={best_score:.4f}")
-    else:
-        print("Не вийшло натренувати жодної моделі (перевір дані).")
 
 
 def run_single_experiment(model_name: str, params: dict, run_name: str | None = None) -> None:
     _set_mlflow()
-
-    df = load_raw_csv(DATA_RAW_PATH)
-    df = clean_telco_df(df)
-    save_processed_df(df)
-
-    preprocessor, X_train, X_test, y_train, y_test = make_train_test(df)
+    X_train, X_test, y_train, y_test = _load_prepared(PREPARED_TRAIN_PATH, PREPARED_TEST_PATH, TARGET_COL)
+    base_preprocessor = _build_preprocessor()
 
     model = _build_model(model_name, params)
     pipeline = Pipeline(
         steps=[
-            ("preprocess", clone(preprocessor)),
+            ("preprocess", clone(base_preprocessor)),
             ("model", model),
         ]
     )
@@ -385,32 +439,14 @@ def run_single_experiment(model_name: str, params: dict, run_name: str | None = 
         mlflow.log_param("model_name", model_name)
         for k, v in params.items():
             mlflow.log_param(k, v)
-
         _set_common_tags(model_name)
 
         pipeline.fit(X_train, y_train)
 
-        y_pred_train = pipeline.predict(X_train)
-        y_proba_train = (
-            pipeline.predict_proba(X_train)[:, 1] if hasattr(pipeline, "predict_proba") else None
-        )
-        metrics_train = compute_metrics(y_train, y_pred_train, y_proba=y_proba_train)
-        mlflow.log_metrics({f"train_{k}": v for k, v in metrics_train.items() if v is not None})
-
         y_pred_test = pipeline.predict(X_test)
-        y_proba_test = (
-            pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
-        )
-        metrics_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
-        mlflow.log_metrics({f"test_{k}": v for k, v in metrics_test.items() if v is not None})
-
-        cm_path = run_art_dir / "confusion_matrix.png"
-        save_confusion_matrix(y_test, y_pred_test, cm_path)
-        mlflow.log_artifact(str(cm_path), artifact_path="figures")
-
-        fi_path = run_art_dir / "feature_importance.png"
-        if save_feature_importance(pipeline, fi_path, top_k=20):
-            mlflow.log_artifact(str(fi_path), artifact_path="figures")
+        y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
+        m_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
+        mlflow.log_metrics({f"test_{k}": v for k, v in m_test.items() if v is not None})
 
         _mlflow_log_model(pipeline)
 
@@ -419,9 +455,12 @@ def run_single_experiment(model_name: str, params: dict, run_name: str | None = 
     print(f"Saved: {out_path}")
 
 
+# -------------------------
+# CLI
+# -------------------------
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--mode", choices=["grid", "single"], default="grid")
+    p.add_argument("--mode", choices=["grid", "single", "logreg_c_sweep"], default="grid")
 
     p.add_argument("--model", choices=["logreg", "rf"], default="logreg")
     p.add_argument("--C", type=float, default=1.0)
@@ -430,16 +469,32 @@ def parse_args():
     p.add_argument("--n_estimators", type=int, default=300)
     p.add_argument("--max_depth", type=int, default=0, help="0 означає None")
 
+    # 👇 додали для sweep
+    p.add_argument("--c-values", type=float, nargs="+", default=[0.05, 0.2, 0.85, 1.0, 1.15, 5.0, 20.0])
+    p.add_argument("--run-prefix", type=str, default="lab2_logreg_C")
+    p.add_argument("--run-group", type=str, default="lab2_c_sweep")
+
     p.add_argument("--run_name", type=str, default=None)
     return p.parse_args()
 
 
 def main():
     args = parse_args()
+
+    if args.mode == "logreg_c_sweep":
+        run_logreg_c_sweep(
+            c_values=args.c_values,
+            solver=args.solver,
+            run_prefix=args.run_prefix,
+            run_group=args.run_group,
+        )
+        return
+
     if args.mode == "grid":
         run_grid_experiments()
         return
 
+    # single
     if args.model == "logreg":
         run_single_experiment(
             "logreg",

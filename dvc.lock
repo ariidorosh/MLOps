@@ -1,0 +1,51 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: python src/prepare.py --input data/raw/telco_churn.csv --out-dir 
+      data/prepared
+    deps:
+    - path: data/raw/telco_churn.csv
+      hash: md5
+      md5: 0f9de68e012bd3aed5fa7cdc9fc421af
+      size: 977501
+    - path: src/prepare.py
+      hash: md5
+      md5: db8cfe2a389f46b1523c53c4afaf7957
+      size: 3602
+    outs:
+    - path: data/prepared/test.csv
+      hash: md5
+      md5: c47bda426e057bf899a7c2e34d3379fc
+      size: 180737
+    - path: data/prepared/train.csv
+      hash: md5
+      md5: 457eb9edc4aa94d7f778128515817cb1
+      size: 721039
+  train:
+    cmd: python -m src.train --mode logreg_c_sweep
+    deps:
+    - path: data/prepared/test.csv
+      hash: md5
+      md5: c47bda426e057bf899a7c2e34d3379fc
+      size: 180737
+    - path: data/prepared/train.csv
+      hash: md5
+      md5: 457eb9edc4aa94d7f778128515817cb1
+      size: 721039
+    - path: src/config.py
+      hash: md5
+      md5: 0119dded44e1c60a47b24c99e3106232
+      size: 1017
+    - path: src/evaluate.py
+      hash: md5
+      md5: b168098c31ee2f2792ddd8f2d22fd371
+      size: 3111
+    - path: src/train.py
+      hash: md5
+      md5: 9cfe368cc1d53ccab26b97966114b52f
+      size: 17826
+    outs:
+    - path: models/best_model.joblib
+      hash: md5
+      md5: 3e4a978db4ab1cbec088f7565d77dc16
+      size: 8118

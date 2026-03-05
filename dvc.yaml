@@ -1,0 +1,20 @@
+stages:
+  prepare:
+    cmd: python src/prepare.py --input data/raw/telco_churn.csv --out-dir data/prepared
+    deps:
+      - data/raw/telco_churn.csv
+      - src/prepare.py
+    outs:
+      - data/prepared/train.csv
+      - data/prepared/test.csv
+
+  train:
+    cmd: python -m src.train --mode logreg_c_sweep
+    deps:
+      - data/prepared/train.csv
+      - data/prepared/test.csv
+      - src/train.py
+      - src/evaluate.py
+      - src/config.py
+    outs:
+      - models/best_model.joblib

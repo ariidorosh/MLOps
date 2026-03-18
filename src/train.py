@@ -1,4 +1,3 @@
-# src/train.py
 from __future__ import annotations
 
 import argparse
@@ -34,6 +33,7 @@ from .config import (
 )
 from .evaluate import (
     compute_metrics,
+    save_metrics_json,
     save_confusion_matrix,
     make_classification_report_text,
     save_feature_importance,
@@ -42,6 +42,7 @@ from .evaluate import (
 AUTHOR = "ariidorosh"
 DATASET_NAME = "telco-churn"
 DATASET_VERSION = "v2_prepared_split"
+REPORTS_DIR = ROOT / "reports"
 
 
 # -------------------------
@@ -134,7 +135,7 @@ def _normalize_target(y: pd.Series) -> pd.Series:
     if uniq.issubset({"0", "1"}):
         return ys.astype(int)
 
-    return ys  # fallback
+    return ys
 
 
 def _load_prepared(
@@ -153,7 +154,6 @@ def _load_prepared(
     if target_col not in train_df.columns or target_col not in test_df.columns:
         raise ValueError(f"Target column '{target_col}' must exist in both train.csv and test.csv")
 
-    # прибираємо id-колонки (якщо раптом лишилися)
     drop_cols = [c for c in ID_COLS if c in train_df.columns]
     if drop_cols:
         train_df = train_df.drop(columns=drop_cols)
@@ -165,7 +165,6 @@ def _load_prepared(
     X_train = train_df.drop(columns=[target_col])
     X_test = test_df.drop(columns=[target_col])
 
-    # safety: TotalCharges інколи як string
     if "TotalCharges" in X_train.columns:
         X_train["TotalCharges"] = pd.to_numeric(X_train["TotalCharges"], errors="coerce")
         X_test["TotalCharges"] = pd.to_numeric(X_test["TotalCharges"], errors="coerce")
@@ -174,7 +173,7 @@ def _load_prepared(
 
 
 # -------------------------
-# Preprocessor (SAFE for Windows)
+# Preprocessor
 # -------------------------
 def _make_onehot() -> OneHotEncoder:
     sig = inspect.signature(OneHotEncoder)
@@ -184,11 +183,6 @@ def _make_onehot() -> OneHotEncoder:
 
 
 def _build_preprocessor() -> ColumnTransformer:
-    """
-    БЕЗ scaler — це максимально стабільно на Windows і достатньо для LogisticRegression baseline.
-    - numeric: median impute
-    - categorical: most_frequent impute + one-hot
-    """
     numeric_selector = make_column_selector(dtype_include=["number"])
     categorical_selector = make_column_selector(dtype_exclude=["number"])
 
@@ -234,7 +228,7 @@ def _build_model(model_name: str, params: dict):
             n_estimators=n_estimators,
             max_depth=max_depth,
             random_state=RANDOM_STATE,
-            n_jobs=1,  # safe
+            n_jobs=1,
         )
 
     raise ValueError(f"Unknown model_name: {model_name}")
@@ -242,6 +236,29 @@ def _build_model(model_name: str, params: dict):
 
 def _format_c_for_name(c: float) -> str:
     return f"{c:g}"
+
+
+def _save_final_reports(pipeline: Pipeline, y_test, X_test) -> dict:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    y_pred_test = pipeline.predict(X_test)
+    y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
+    metrics = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
+
+    save_metrics_json(metrics, REPORTS_DIR / "metrics.json")
+    save_confusion_matrix(y_test, y_pred_test, REPORTS_DIR / "confusion_matrix.png")
+
+    (REPORTS_DIR / "classification_report.txt").write_text(
+        make_classification_report_text(y_test, y_pred_test),
+        encoding="utf-8",
+    )
+
+    try:
+        save_feature_importance(pipeline, REPORTS_DIR / "feature_importance.png", top_k=20)
+    except Exception:
+        pass
+
+    return metrics
 
 
 # -------------------------
@@ -261,6 +278,7 @@ def run_logreg_c_sweep(
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     best_score = -1.0
     best_pipeline: Pipeline | None = None
@@ -291,19 +309,16 @@ def run_logreg_c_sweep(
 
             pipeline.fit(X_train, y_train)
 
-            # train metrics
             y_pred_train = pipeline.predict(X_train)
             y_proba_train = pipeline.predict_proba(X_train)[:, 1] if hasattr(pipeline, "predict_proba") else None
             m_train = compute_metrics(y_train, y_pred_train, y_proba=y_proba_train)
             mlflow.log_metrics({f"train_{k}": v for k, v in m_train.items() if v is not None})
 
-            # test metrics
             y_pred_test = pipeline.predict(X_test)
             y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
             m_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
             mlflow.log_metrics({f"test_{k}": v for k, v in m_test.items() if v is not None})
 
-            # artifacts
             cm_path = run_art_dir / "confusion_matrix.png"
             save_confusion_matrix(y_test, y_pred_test, cm_path)
             mlflow.log_artifact(str(cm_path), artifact_path="figures")
@@ -317,7 +332,6 @@ def run_logreg_c_sweep(
                 if save_feature_importance(pipeline, fi_path, top_k=20):
                     mlflow.log_artifact(str(fi_path), artifact_path="figures")
             except Exception:
-                # важливість ознак не критична для логрег — не валимо run
                 pass
 
             _mlflow_log_model(pipeline)
@@ -334,8 +348,13 @@ def run_logreg_c_sweep(
     if best_pipeline is not None:
         out_path = MODELS_DIR / "best_model.joblib"
         joblib.dump(best_pipeline, out_path)
+
+        final_metrics = _save_final_reports(best_pipeline, y_test, X_test)
+
         print(f"Best model saved to: {out_path}")
         print(f"Best run: {best_run_name}, score={best_score:.4f}")
+        print(f"Reports saved to: {REPORTS_DIR}")
+        print(f"Final metrics: {final_metrics}")
     else:
         print("Не вийшло натренувати жодної моделі (перевір prepared дані).")
 
@@ -347,6 +366,7 @@ def run_grid_experiments() -> None:
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     experiments = [
         ("logreg", {"C": 0.2, "solver": "liblinear"}),
@@ -411,8 +431,13 @@ def run_grid_experiments() -> None:
     if best_pipeline is not None:
         out_path = MODELS_DIR / "best_model.joblib"
         joblib.dump(best_pipeline, out_path)
+
+        final_metrics = _save_final_reports(best_pipeline, y_test, X_test)
+
         print(f"Best model saved to: {out_path}")
         print(f"Best run: {best_run_name}, score={best_score:.4f}")
+        print(f"Reports saved to: {REPORTS_DIR}")
+        print(f"Final metrics: {final_metrics}")
 
 
 def run_single_experiment(model_name: str, params: dict, run_name: str | None = None) -> None:
@@ -430,6 +455,7 @@ def run_single_experiment(model_name: str, params: dict, run_name: str | None = 
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     rn = run_name or f"single_{model_name}"
     run_art_dir = FIGURES_DIR / rn
@@ -448,11 +474,20 @@ def run_single_experiment(model_name: str, params: dict, run_name: str | None = 
         m_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
         mlflow.log_metrics({f"test_{k}": v for k, v in m_test.items() if v is not None})
 
+        cm_path = run_art_dir / "confusion_matrix.png"
+        save_confusion_matrix(y_test, y_pred_test, cm_path)
+        mlflow.log_artifact(str(cm_path), artifact_path="figures")
+
         _mlflow_log_model(pipeline)
 
     out_path = MODELS_DIR / "last_model.joblib"
     joblib.dump(pipeline, out_path)
+
+    final_metrics = _save_final_reports(pipeline, y_test, X_test)
+
     print(f"Saved: {out_path}")
+    print(f"Reports saved to: {REPORTS_DIR}")
+    print(f"Final metrics: {final_metrics}")
 
 
 # -------------------------
@@ -469,7 +504,6 @@ def parse_args():
     p.add_argument("--n_estimators", type=int, default=300)
     p.add_argument("--max_depth", type=int, default=0, help="0 означає None")
 
-    # 👇 додали для sweep
     p.add_argument("--c-values", type=float, nargs="+", default=[0.05, 0.2, 0.85, 1.0, 1.15, 5.0, 20.0])
     p.add_argument("--run-prefix", type=str, default="lab2_logreg_C")
     p.add_argument("--run-group", type=str, default="lab2_c_sweep")
@@ -494,7 +528,6 @@ def main():
         run_grid_experiments()
         return
 
-    # single
     if args.model == "logreg":
         run_single_experiment(
             "logreg",

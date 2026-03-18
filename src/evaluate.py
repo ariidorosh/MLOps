@@ -1,5 +1,5 @@
-# src/evaluate.py
 from pathlib import Path
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -21,6 +21,7 @@ def compute_metrics(y_true, y_pred, y_proba=None) -> dict:
         "precision": float(precision_score(y_true, y_pred, zero_division=0)),
         "recall": float(recall_score(y_true, y_pred, zero_division=0)),
         "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+        "roc_auc": None,
     }
 
     if y_proba is not None:
@@ -30,6 +31,22 @@ def compute_metrics(y_true, y_pred, y_proba=None) -> dict:
             metrics["roc_auc"] = None
 
     return metrics
+
+
+def save_metrics_json(metrics: dict, out_path: Path) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    clean_metrics = {}
+    for key, value in metrics.items():
+        if value is None:
+            clean_metrics[key] = None
+        else:
+            clean_metrics[key] = float(value)
+
+    out_path.write_text(
+        json.dumps(clean_metrics, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def save_confusion_matrix(y_true, y_pred, out_path: Path) -> None:

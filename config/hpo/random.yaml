@@ -1,0 +1,4 @@
+sampler: random
+n_trials: 20
+use_cv: false
+cv_folds: 5

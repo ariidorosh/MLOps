@@ -1,0 +1,34 @@
+defaults:
+  - model: logreg
+  - hpo: tpe
+  - _self_
+
+seed: 42
+
+paths:
+  train_csv: data/prepared/train.csv
+  test_csv: data/prepared/test.csv
+  best_model: models/best_model_lab3.joblib
+  best_params: models/best_params_lab3.json
+  reports_dir: reports
+  figures_dir: reports/figures
+
+target_col: Churn
+id_cols: []
+
+split:
+  val_size: 0.2
+  stratify: true
+
+metric:
+  name: roc_auc
+  direction: maximize
+
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment_name: telco-churn-lab3
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

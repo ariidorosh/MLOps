@@ -1,0 +1,105 @@
+name: cml-ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  train-test-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up CML
+        uses: iterative/setup-cml@v2
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Якщо дані в репі вже готові — prepare пропуститься.
+      # Якщо prepared ще нема, але є raw csv — він згенерується.
+      - name: Prepare data if needed
+        run: |
+          if [ -f data/prepared/train.csv ] && [ -f data/prepared/test.csv ]; then
+            echo "Prepared data already exists. Skipping prepare."
+          else
+            python src/prepare.py --input data/raw/telco_churn.csv --out-dir data/prepared
+          fi
+
+      # Якщо колись захочеш тягнути дані з DVC remote, можеш розкоментити:
+      # - name: Pull data from DVC remote
+      #   run: |
+      #     pip install dvc
+      #     dvc pull
+
+      - name: Train model
+        run: |
+          python -m src.train --mode logreg_c_sweep
+
+      - name: Run tests
+        run: |
+          pytest -q
+
+      - name: Build CML report
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          metrics_path = Path("reports/metrics.json")
+          cm_path = Path("reports/confusion_matrix.png")
+          report_path = Path("report.md")
+
+          metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+
+          def fmt(x):
+              return "None" if x is None else f"{float(x):.4f}"
+
+          report = f"""# CML Report
+
+          ## Metrics
+
+          | Metric | Value |
+          |---|---:|
+          | Accuracy | {fmt(metrics.get('accuracy'))} |
+          | Precision | {fmt(metrics.get('precision'))} |
+          | Recall | {fmt(metrics.get('recall'))} |
+          | F1 | {fmt(metrics.get('f1'))} |
+          | ROC AUC | {fmt(metrics.get('roc_auc'))} |
+
+          ## Confusion Matrix
+
+          ![Confusion Matrix](reports/confusion_matrix.png)
+          """
+
+          report_path.write_text(report, encoding="utf-8")
+          print(report)
+          PY
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-artifacts
+          path: |
+            reports/
+            models/best_model.joblib
+            report.md
+
+      - name: Comment PR with CML report
+        if: github.event_name == 'pull_request'
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cml comment create report.md

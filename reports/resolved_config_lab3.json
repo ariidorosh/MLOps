@@ -1,0 +1,45 @@
+{
+  "model": {
+    "type": "logreg",
+    "params": {
+      "solver": "liblinear",
+      "max_iter": 2000
+    },
+    "search_space": {
+      "C": {
+        "low": 0.001,
+        "high": 100.0,
+        "log": true
+      }
+    }
+  },
+  "hpo": {
+    "sampler": "random",
+    "n_trials": 20,
+    "use_cv": false,
+    "cv_folds": 5
+  },
+  "seed": 42,
+  "paths": {
+    "train_csv": "data/prepared/train.csv",
+    "test_csv": "data/prepared/test.csv",
+    "best_model": "models/best_model_lab3.joblib",
+    "best_params": "models/best_params_lab3.json",
+    "reports_dir": "reports",
+    "figures_dir": "reports/figures"
+  },
+  "target_col": "Churn",
+  "id_cols": [],
+  "split": {
+    "val_size": 0.2,
+    "stratify": true
+  },
+  "metric": {
+    "name": "roc_auc",
+    "direction": "maximize"
+  },
+  "mlflow": {
+    "tracking_uri": "sqlite:///mlflow.db",
+    "experiment_name": "telco-churn-lab3"
+  }
+}

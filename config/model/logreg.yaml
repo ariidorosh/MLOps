@@ -1,0 +1,11 @@
+type: logreg
+
+params:
+  solver: liblinear
+  max_iter: 2000
+
+search_space:
+  C:
+    low: 0.001
+    high: 100.0
+    log: true

@@ -18,3 +18,31 @@ stages:
       - src/config.py
     outs:
       - models/best_model.joblib
+
+  optimize_tpe:
+    cmd: python -m src.optimize
+    deps:
+      - data/prepared/train.csv
+      - data/prepared/test.csv
+      - src/optimize.py
+      - config/config.yaml
+      - config/model/logreg.yaml
+      - config/hpo/tpe.yaml
+    outs:
+      - models/best_model_lab3_tpe.joblib
+      - models/best_params_lab3_tpe.json
+      - reports/resolved_config_lab3_tpe.json
+
+  optimize_random:
+    cmd: python -m src.optimize hpo=random
+    deps:
+      - data/prepared/train.csv
+      - data/prepared/test.csv
+      - src/optimize.py
+      - config/config.yaml
+      - config/model/logreg.yaml
+      - config/hpo/random.yaml
+    outs:
+      - models/best_model_lab3_random.joblib
+      - models/best_params_lab3_random.json
+      - reports/resolved_config_lab3_random.json

@@ -49,3 +49,83 @@ stages:
       hash: md5
       md5: 3e4a978db4ab1cbec088f7565d77dc16
       size: 8118
+  optimize_tpe:
+    cmd: python -m src.optimize
+    deps:
+    - path: config/config.yaml
+      hash: md5
+      md5: 9b4ec69d9e544bc0e8425c4010ebd5e8
+      size: 564
+    - path: config/hpo/tpe.yaml
+      hash: md5
+      md5: dd6788439a51d93005b9401f8e4a98f6
+      size: 54
+    - path: config/model/logreg.yaml
+      hash: md5
+      md5: 08e89e99deb78c1e23ad065cc74167af
+      size: 133
+    - path: data/prepared/test.csv
+      hash: md5
+      md5: c47bda426e057bf899a7c2e34d3379fc
+      size: 180737
+    - path: data/prepared/train.csv
+      hash: md5
+      md5: 457eb9edc4aa94d7f778128515817cb1
+      size: 721039
+    - path: src/optimize.py
+      hash: md5
+      md5: 1dea0b0aa5436f0ed97a633b1842b44f
+      size: 11406
+    outs:
+    - path: models/best_model_lab3_tpe.joblib
+      hash: md5
+      md5: 18782b88ebf29844b12bb0185ab1e160
+      size: 8118
+    - path: models/best_params_lab3_tpe.json
+      hash: md5
+      md5: 75f3ef0d091f12c14568813d4a4bc716
+      size: 31
+    - path: reports/resolved_config_lab3_tpe.json
+      hash: md5
+      md5: e70019d5cb3630a04975b3b197bfcf2e
+      size: 935
+  optimize_random:
+    cmd: python -m src.optimize hpo=random
+    deps:
+    - path: config/config.yaml
+      hash: md5
+      md5: 9b4ec69d9e544bc0e8425c4010ebd5e8
+      size: 564
+    - path: config/hpo/random.yaml
+      hash: md5
+      md5: dae14a36a6bc5f0719c218d810f87f97
+      size: 57
+    - path: config/model/logreg.yaml
+      hash: md5
+      md5: 08e89e99deb78c1e23ad065cc74167af
+      size: 133
+    - path: data/prepared/test.csv
+      hash: md5
+      md5: c47bda426e057bf899a7c2e34d3379fc
+      size: 180737
+    - path: data/prepared/train.csv
+      hash: md5
+      md5: 457eb9edc4aa94d7f778128515817cb1
+      size: 721039
+    - path: src/optimize.py
+      hash: md5
+      md5: 1dea0b0aa5436f0ed97a633b1842b44f
+      size: 11406
+    outs:
+    - path: models/best_model_lab3_random.joblib
+      hash: md5
+      md5: 0f57500a7967e5d793a4ab9008b87f4d
+      size: 8118
+    - path: models/best_params_lab3_random.json
+      hash: md5
+      md5: 9cc593dda77952d343b9c255b9754052
+      size: 33
+    - path: reports/resolved_config_lab3_random.json
+      hash: md5
+      md5: 80c082cb71bd7bfecd9acd74be260913
+      size: 938

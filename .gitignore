@@ -17,13 +17,13 @@ Thumbs.db
 .idea/
 *.iml
 
-# VS Code (на всяк випадок)
+# VS Code
 .vscode/
 
 # ===== Jupyter =====
 .ipynb_checkpoints/
 
-# ===== Data / Artifacts (не комітимо) =====
+# ===== Data / Artifacts =====
 models/
 reports/figures/
 
@@ -44,18 +44,22 @@ build/
 dist/
 *.egg-info/
 
-# ===== Optional: local config/secrets =====
+# ===== Optional: local config / secrets =====
 .env
 *.key
 *.pem
 
-
-# Data (DVC)
+# ===== Data (DVC) =====
 data/*
 !data/raw/
 data/raw/*
 !data/raw/*.dvc
 !data/raw/.gitignore
 
-# Local DVC remote (if inside repo)
+# allow prepared data for CI
+!data/prepared/
+!data/prepared/train.csv
+!data/prepared/test.csv
+
+# ===== Local DVC remote (if inside repo) =====
 dvc_storage/

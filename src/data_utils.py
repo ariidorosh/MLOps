@@ -42,7 +42,9 @@ def save_processed_df(df: pd.DataFrame) -> Path:
 
 def split_xy(df: pd.DataFrame):
     if TARGET_COL not in df.columns:
-        raise ValueError(f"Не знайшов колонку таргету '{TARGET_COL}'. Є колонки: {list(df.columns)}")
+        raise ValueError(
+            f"Не знайшов колонку таргету '{TARGET_COL}'. Є колонки: {list(df.columns)}"
+        )
 
     y_raw = df[TARGET_COL]
 

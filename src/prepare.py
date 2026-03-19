@@ -83,12 +83,26 @@ def run_prepare(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Prepare Telco Churn dataset for training.")
-    parser.add_argument("--input", required=True, help="Path to raw CSV (e.g., data/raw/telco_churn.csv)")
-    parser.add_argument("--out-dir", required=True, help="Output dir (e.g., data/prepared)")
-    parser.add_argument("--target", default="Churn", help="Target column name (default: Churn)")
-    parser.add_argument("--test-size", type=float, default=0.2, help="Test split size (default: 0.2)")
-    parser.add_argument("--random-state", type=int, default=42, help="Random seed (default: 42)")
+    parser = argparse.ArgumentParser(
+        description="Prepare Telco Churn dataset for training."
+    )
+    parser.add_argument(
+        "--input",
+        required=True,
+        help="Path to raw CSV (e.g., data/raw/telco_churn.csv)",
+    )
+    parser.add_argument(
+        "--out-dir", required=True, help="Output dir (e.g., data/prepared)"
+    )
+    parser.add_argument(
+        "--target", default="Churn", help="Target column name (default: Churn)"
+    )
+    parser.add_argument(
+        "--test-size", type=float, default=0.2, help="Test split size (default: 0.2)"
+    )
+    parser.add_argument(
+        "--random-state", type=int, default=42, help="Random seed (default: 42)"
+    )
     args = parser.parse_args()
 
     run_prepare(

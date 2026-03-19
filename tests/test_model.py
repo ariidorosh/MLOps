@@ -37,9 +37,9 @@ def test_quality_gate():
     f1 = metrics.get("f1")
 
     if roc_auc is not None:
-        assert float(roc_auc) >= MIN_ROC_AUC, (
-            f"Quality gate failed: roc_auc={roc_auc:.4f} < {MIN_ROC_AUC}"
-        )
+        assert (
+            float(roc_auc) >= MIN_ROC_AUC
+        ), f"Quality gate failed: roc_auc={roc_auc:.4f} < {MIN_ROC_AUC}"
     else:
         assert f1 is not None, "Both roc_auc and f1 are missing"
         assert float(f1) >= MIN_F1, f"Quality gate failed: f1={f1:.4f} < {MIN_F1}"

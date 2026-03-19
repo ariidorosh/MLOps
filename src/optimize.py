@@ -48,7 +48,9 @@ def load_data(train_path: str, test_path: str, target_col: str):
     X_test = test_df.drop(columns=[target_col])
 
     if "TotalCharges" in X_train.columns:
-        X_train["TotalCharges"] = pd.to_numeric(X_train["TotalCharges"], errors="coerce")
+        X_train["TotalCharges"] = pd.to_numeric(
+            X_train["TotalCharges"], errors="coerce"
+        )
         X_test["TotalCharges"] = pd.to_numeric(X_test["TotalCharges"], errors="coerce")
 
     return X_train, X_test, y_train, y_test
@@ -190,7 +192,7 @@ def main(cfg: DictConfig):
         sampler=sampler,
     )
 
-    with mlflow.start_run(run_name=f"hpo_{cfg.model.type}_{cfg.hpo.sampler}") as parent_run:
+    with mlflow.start_run(run_name=f"hpo_{cfg.model.type}_{cfg.hpo.sampler}"):
         mlflow.log_params(
             {
                 "model_type": cfg.model.type,
@@ -203,10 +205,11 @@ def main(cfg: DictConfig):
 
         resolved_cfg = OmegaConf.to_container(cfg, resolve=True)
         Path("reports").mkdir(parents=True, exist_ok=True)
-        config_dump_path = Path("reports") / f"resolved_config_lab3_{cfg.hpo.sampler}.json"
+        config_dump_path = (
+            Path("reports") / f"resolved_config_lab3_{cfg.hpo.sampler}.json"
+        )
         config_dump_path.write_text(
-            json.dumps(resolved_cfg, indent=2, ensure_ascii=False),
-            encoding="utf-8"
+            json.dumps(resolved_cfg, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         mlflow.log_artifact(str(config_dump_path), artifact_path="config")
 
@@ -265,7 +268,11 @@ def main(cfg: DictConfig):
                 pipeline.fit(X_train, y_train)
 
                 y_pred = pipeline.predict(X_val)
-                y_proba = pipeline.predict_proba(X_val)[:, 1] if hasattr(pipeline, "predict_proba") else None
+                y_proba = (
+                    pipeline.predict_proba(X_val)[:, 1]
+                    if hasattr(pipeline, "predict_proba")
+                    else None
+                )
 
                 score = evaluate_metric(cfg.metric.name, y_val, y_pred, y_proba)
                 mlflow.log_metric("val_score", score)
@@ -299,7 +306,11 @@ def main(cfg: DictConfig):
         final_pipeline.fit(X_train_full, y_train_full)
 
         y_test_pred = final_pipeline.predict(X_test)
-        y_test_proba = final_pipeline.predict_proba(X_test)[:, 1] if hasattr(final_pipeline, "predict_proba") else None
+        y_test_proba = (
+            final_pipeline.predict_proba(X_test)[:, 1]
+            if hasattr(final_pipeline, "predict_proba")
+            else None
+        )
         test_score = evaluate_metric(cfg.metric.name, y_test, y_test_pred, y_test_proba)
 
         mlflow.log_metric("final_test_score", float(test_score))
@@ -310,7 +321,9 @@ def main(cfg: DictConfig):
         best_params_path.parent.mkdir(parents=True, exist_ok=True)
         best_model_path.parent.mkdir(parents=True, exist_ok=True)
 
-        best_params_path.write_text(json.dumps(best_params, indent=2, ensure_ascii=False), encoding="utf-8")
+        best_params_path.write_text(
+            json.dumps(best_params, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         joblib.dump(final_pipeline, best_model_path)
 
         mlflow.log_artifact(str(best_params_path), artifact_path="artifacts")

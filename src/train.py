@@ -100,7 +100,9 @@ def _mlflow_log_model(pipeline: Pipeline) -> None:
         mlflow.sklearn.log_model(pipeline, artifact_path="model", **kwargs)
 
 
-def _set_common_tags(model_name: str, run_group: str | None = None, tuning_param: str | None = None) -> None:
+def _set_common_tags(
+    model_name: str, run_group: str | None = None, tuning_param: str | None = None
+) -> None:
     mlflow.set_tag("author", AUTHOR)
     mlflow.set_tag("dataset", DATASET_NAME)
     mlflow.set_tag("dataset_version", DATASET_VERSION)
@@ -152,7 +154,9 @@ def _load_prepared(
     test_df = pd.read_csv(test_path)
 
     if target_col not in train_df.columns or target_col not in test_df.columns:
-        raise ValueError(f"Target column '{target_col}' must exist in both train.csv and test.csv")
+        raise ValueError(
+            f"Target column '{target_col}' must exist in both train.csv and test.csv"
+        )
 
     drop_cols = [c for c in ID_COLS if c in train_df.columns]
     if drop_cols:
@@ -166,7 +170,9 @@ def _load_prepared(
     X_test = test_df.drop(columns=[target_col])
 
     if "TotalCharges" in X_train.columns:
-        X_train["TotalCharges"] = pd.to_numeric(X_train["TotalCharges"], errors="coerce")
+        X_train["TotalCharges"] = pd.to_numeric(
+            X_train["TotalCharges"], errors="coerce"
+        )
         X_test["TotalCharges"] = pd.to_numeric(X_test["TotalCharges"], errors="coerce")
 
     return X_train, X_test, y_train, y_test
@@ -242,7 +248,11 @@ def _save_final_reports(pipeline: Pipeline, y_test, X_test) -> dict:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     y_pred_test = pipeline.predict(X_test)
-    y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
+    y_proba_test = (
+        pipeline.predict_proba(X_test)[:, 1]
+        if hasattr(pipeline, "predict_proba")
+        else None
+    )
     metrics = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
 
     save_metrics_json(metrics, REPORTS_DIR / "metrics.json")
@@ -254,7 +264,9 @@ def _save_final_reports(pipeline: Pipeline, y_test, X_test) -> dict:
     )
 
     try:
-        save_feature_importance(pipeline, REPORTS_DIR / "feature_importance.png", top_k=20)
+        save_feature_importance(
+            pipeline, REPORTS_DIR / "feature_importance.png", top_k=20
+        )
     except Exception:
         pass
 
@@ -310,21 +322,35 @@ def run_logreg_c_sweep(
             pipeline.fit(X_train, y_train)
 
             y_pred_train = pipeline.predict(X_train)
-            y_proba_train = pipeline.predict_proba(X_train)[:, 1] if hasattr(pipeline, "predict_proba") else None
+            y_proba_train = (
+                pipeline.predict_proba(X_train)[:, 1]
+                if hasattr(pipeline, "predict_proba")
+                else None
+            )
             m_train = compute_metrics(y_train, y_pred_train, y_proba=y_proba_train)
-            mlflow.log_metrics({f"train_{k}": v for k, v in m_train.items() if v is not None})
+            mlflow.log_metrics(
+                {f"train_{k}": v for k, v in m_train.items() if v is not None}
+            )
 
             y_pred_test = pipeline.predict(X_test)
-            y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
+            y_proba_test = (
+                pipeline.predict_proba(X_test)[:, 1]
+                if hasattr(pipeline, "predict_proba")
+                else None
+            )
             m_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
-            mlflow.log_metrics({f"test_{k}": v for k, v in m_test.items() if v is not None})
+            mlflow.log_metrics(
+                {f"test_{k}": v for k, v in m_test.items() if v is not None}
+            )
 
             cm_path = run_art_dir / "confusion_matrix.png"
             save_confusion_matrix(y_test, y_pred_test, cm_path)
             mlflow.log_artifact(str(cm_path), artifact_path="figures")
 
             report_path = run_art_dir / "classification_report.txt"
-            report_path.write_text(make_classification_report_text(y_test, y_pred_test), encoding="utf-8")
+            report_path.write_text(
+                make_classification_report_text(y_test, y_pred_test), encoding="utf-8"
+            )
             mlflow.log_artifact(str(report_path), artifact_path="reports")
 
             fi_path = run_art_dir / "feature_importance.png"
@@ -361,7 +387,9 @@ def run_logreg_c_sweep(
 
 def run_grid_experiments() -> None:
     _set_mlflow()
-    X_train, X_test, y_train, y_test = _load_prepared(PREPARED_TRAIN_PATH, PREPARED_TEST_PATH, TARGET_COL)
+    X_train, X_test, y_train, y_test = _load_prepared(
+        PREPARED_TRAIN_PATH, PREPARED_TEST_PATH, TARGET_COL
+    )
     base_preprocessor = _build_preprocessor()
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -404,14 +432,26 @@ def run_grid_experiments() -> None:
             pipeline.fit(X_train, y_train)
 
             y_pred_train = pipeline.predict(X_train)
-            y_proba_train = pipeline.predict_proba(X_train)[:, 1] if hasattr(pipeline, "predict_proba") else None
+            y_proba_train = (
+                pipeline.predict_proba(X_train)[:, 1]
+                if hasattr(pipeline, "predict_proba")
+                else None
+            )
             m_train = compute_metrics(y_train, y_pred_train, y_proba=y_proba_train)
-            mlflow.log_metrics({f"train_{k}": v for k, v in m_train.items() if v is not None})
+            mlflow.log_metrics(
+                {f"train_{k}": v for k, v in m_train.items() if v is not None}
+            )
 
             y_pred_test = pipeline.predict(X_test)
-            y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
+            y_proba_test = (
+                pipeline.predict_proba(X_test)[:, 1]
+                if hasattr(pipeline, "predict_proba")
+                else None
+            )
             m_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
-            mlflow.log_metrics({f"test_{k}": v for k, v in m_test.items() if v is not None})
+            mlflow.log_metrics(
+                {f"test_{k}": v for k, v in m_test.items() if v is not None}
+            )
 
             cm_path = run_art_dir / "confusion_matrix.png"
             save_confusion_matrix(y_test, y_pred_test, cm_path)
@@ -440,9 +480,13 @@ def run_grid_experiments() -> None:
         print(f"Final metrics: {final_metrics}")
 
 
-def run_single_experiment(model_name: str, params: dict, run_name: str | None = None) -> None:
+def run_single_experiment(
+    model_name: str, params: dict, run_name: str | None = None
+) -> None:
     _set_mlflow()
-    X_train, X_test, y_train, y_test = _load_prepared(PREPARED_TRAIN_PATH, PREPARED_TEST_PATH, TARGET_COL)
+    X_train, X_test, y_train, y_test = _load_prepared(
+        PREPARED_TRAIN_PATH, PREPARED_TEST_PATH, TARGET_COL
+    )
     base_preprocessor = _build_preprocessor()
 
     model = _build_model(model_name, params)
@@ -470,7 +514,11 @@ def run_single_experiment(model_name: str, params: dict, run_name: str | None = 
         pipeline.fit(X_train, y_train)
 
         y_pred_test = pipeline.predict(X_test)
-        y_proba_test = pipeline.predict_proba(X_test)[:, 1] if hasattr(pipeline, "predict_proba") else None
+        y_proba_test = (
+            pipeline.predict_proba(X_test)[:, 1]
+            if hasattr(pipeline, "predict_proba")
+            else None
+        )
         m_test = compute_metrics(y_test, y_pred_test, y_proba=y_proba_test)
         mlflow.log_metrics({f"test_{k}": v for k, v in m_test.items() if v is not None})
 
@@ -495,7 +543,9 @@ def run_single_experiment(model_name: str, params: dict, run_name: str | None = 
 # -------------------------
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--mode", choices=["grid", "single", "logreg_c_sweep"], default="grid")
+    p.add_argument(
+        "--mode", choices=["grid", "single", "logreg_c_sweep"], default="grid"
+    )
 
     p.add_argument("--model", choices=["logreg", "rf"], default="logreg")
     p.add_argument("--C", type=float, default=1.0)
@@ -504,7 +554,12 @@ def parse_args():
     p.add_argument("--n_estimators", type=int, default=300)
     p.add_argument("--max_depth", type=int, default=0, help="0 означає None")
 
-    p.add_argument("--c-values", type=float, nargs="+", default=[0.05, 0.2, 0.85, 1.0, 1.15, 5.0, 20.0])
+    p.add_argument(
+        "--c-values",
+        type=float,
+        nargs="+",
+        default=[0.05, 0.2, 0.85, 1.0, 1.15, 5.0, 20.0],
+    )
     p.add_argument("--run-prefix", type=str, default="lab2_logreg_C")
     p.add_argument("--run-group", type=str, default="lab2_c_sweep")
 

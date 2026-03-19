@@ -23,8 +23,12 @@ def test_target_column_exists():
     train_df = pd.read_csv(TRAIN_PATH)
     test_df = pd.read_csv(TEST_PATH)
 
-    assert TARGET_COL in train_df.columns, f"Missing target column '{TARGET_COL}' in train.csv"
-    assert TARGET_COL in test_df.columns, f"Missing target column '{TARGET_COL}' in test.csv"
+    assert (
+        TARGET_COL in train_df.columns
+    ), f"Missing target column '{TARGET_COL}' in train.csv"
+    assert (
+        TARGET_COL in test_df.columns
+    ), f"Missing target column '{TARGET_COL}' in test.csv"
 
 
 def test_target_has_at_least_two_classes():
